@@ -48,7 +48,7 @@
 #include "./USB/usb_function_cdc.h"
 
 #include "HardwareProfile.h"
-
+#include "TimeDelay.h"
 #if defined (__C30__) || defined(__C32__)
     #include "./uart2.h"
 #endif
@@ -292,9 +292,18 @@ int main(void)
     #if defined(USB_INTERRUPT)
         USBDeviceAttach();
     #endif
+LATB &= 0x00; TRISB &= 0x00;
+  
+while(1) {
+LATBbits.LATB3 = 1;
+DelayMs(1000);
+LATBbits.LATB3 = 0;
+DelayMs(1000);
+}
 
-    while(1)
+  while(1)
     {
+LATBbits.LATB3 = 1;
         #if defined(USB_POLLING)
 		// Check bus status and service USB interrupts.
         USBDeviceTasks(); // Interrupt or polling method.  If using polling, must call
