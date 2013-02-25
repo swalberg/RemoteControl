@@ -3,5 +3,5 @@
 *.cof
 *.map
 *.mcs
-*s\#*
+*[bs]\#*
 *.err
