@@ -107,7 +107,7 @@
     #define PICDEM_FS_USB
     #define CLOCK_FREQ 48000000
     #define GetSystemClock() (CLOCK_FREQ)
-    #define GetInstructionClock() GetSystemClock()
+    #define GetInstructionClock() (GetSystemClock() / 2)
 
 
     /** LED ************************************************************/

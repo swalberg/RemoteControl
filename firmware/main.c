@@ -266,6 +266,78 @@ unsigned char getcUSART ();
 /** DECLARATIONS ***************************************************/
 #pragma code
 
+/* Given a character, returns the remote code to use */
+
+unsigned long char_to_code(char code) {
+  switch(code) {
+    case 'O':
+    case 'o':
+    case '\n':
+      return 0x77f8;
+      break;
+    case '1':
+      return 0x7ff0;
+      break;
+    case '2':
+      return 0xbff8;
+      break;
+    case '3':
+      return 0x3ff4;
+      break;
+    case '4':
+      return 0xdffc;
+      break;
+    case '5':
+      return 0x5ff2;
+      break;
+    case '6':
+      return 0x9ffa;
+      break;
+    case '7':
+      return 0x1ff6;
+      break;
+    case '8':
+      return 0xeffe;
+      break;
+    case '9':
+      return 0x6ff1;
+      break;
+    case '0':
+      return 0xffff;
+      break;
+    case '+': // channel up
+      return 0x2ff5;
+      break;
+    case '-': // channel down
+      return 0xcffd;
+      break;
+    case 'v': // Volume down
+      return 0x8ffb;
+      break;
+    case 'V': // Volume up
+      return 0x4ff3;
+      break;
+    case 'P': // power
+      return 0xaff9;
+      break;
+    default:
+      return 0;
+  }
+}
+
+// Sets up the IR
+void InitializeIROut(void) {
+  LATB &= 0x00; TRISB &= 0x00;
+}
+
+void send_ir_sequence(unsigned long sequence) {
+  LATBbits.LATB3 = 1;
+  DelayMs(100);
+  LATBbits.LATB3 = 0;
+  DelayMs(100);
+}
+
+
 /******************************************************************************
  * Function:        void main(void)
  *
@@ -286,45 +358,23 @@ void main(void)
 #else
 int main(void)
 #endif
-{   
-    InitializeSystem();
+{
+  BYTE i;
 
-    #if defined(USB_INTERRUPT)
-        USBDeviceAttach();
-    #endif
-LATB &= 0x00; TRISB &= 0x00;
-  
-while(1) {
-LATBbits.LATB3 = 1;
-DelayMs(1000);
-LATBbits.LATB3 = 0;
-DelayMs(1000);
-}
+  InitializeSystem();
+  InitializeIROut();
+  LATB &= 0x00; TRISB &= 0x00;
 
-  while(1)
-    {
-LATBbits.LATB3 = 1;
-        #if defined(USB_POLLING)
-		// Check bus status and service USB interrupts.
-        USBDeviceTasks(); // Interrupt or polling method.  If using polling, must call
-        				  // this function periodically.  This function will take care
-        				  // of processing and responding to SETUP transactions 
-        				  // (such as during the enumeration process when you first
-        				  // plug in).  USB hosts require that USB devices should accept
-        				  // and process SETUP packets in a timely fashion.  Therefore,
-        				  // when using polling, this function should be called 
-        				  // regularly (such as once every 1.8ms or faster** [see 
-        				  // inline code comments in usb_device.c for explanation when
-        				  // "or faster" applies])  In most cases, the USBDeviceTasks() 
-        				  // function does not take very long to execute (ex: <100 
-        				  // instruction cycles) before it returns.
-        #endif
-    				  
+  #if defined(USB_INTERRUPT)
+    USBDeviceAttach();
+  #endif
 
-		// Application-specific tasks.
-		// Application related code may be added here, or in the ProcessIO() function.
-        ProcessIO();        
-    }//end while
+  while(1) {
+
+    // Application-specific tasks.
+    ProcessIO();
+
+  }//end while
 }//end main
 
 
@@ -541,7 +591,6 @@ void UserInit(void)
 	LastRS232Out = 0;
 	lastTransmission = 0;
 
-	mInitAllLEDs();
 }//end UserInit
 
 /******************************************************************************
@@ -790,141 +839,61 @@ unsigned char getcUSART ()
  *******************************************************************/
 void ProcessIO(void)
 {   
-    //Blink the LEDs according to the USB device status
-    BlinkUSBStatus();
-    // User Application USB tasks
-    if((USBDeviceState < CONFIGURED_STATE)||(USBSuspendControl==1)) return;
+  BYTE numBytes, i;
+  char buffer[64];
 
-	if (RS232_Out_Data_Rdy == 0)  // only check for new USB buffer if the old RS232 buffer is
-	{						  // empty.  This will cause additional USB packets to be NAK'd
-		LastRS232Out = getsUSBUSART(RS232_Out_Data,64); //until the buffer is free.
-		if(LastRS232Out > 0)
-		{	
-			RS232_Out_Data_Rdy = 1;  // signal buffer full
-			RS232cp = 0;  // Reset the current position
-		}
-	}
 
-    //Check if one or more bytes are waiting in the physical UART transmit
-    //queue.  If so, send it out the UART TX pin.
-	if(RS232_Out_Data_Rdy && mTxRdyUSART())
-	{
-		putcUSART(RS232_Out_Data[RS232cp]);
-		++RS232cp;
-		if (RS232cp == LastRS232Out)
-			RS232_Out_Data_Rdy = 0;
-	}
+  if((USBDeviceState < CONFIGURED_STATE)||(USBSuspendControl==1)) return;
 
-    //Check if we received a character over the physical UART, and we need
-    //to buffer it up for eventual transmission to the USB host.
-	if(mDataRdyUSART() && (NextUSBOut < (CDC_DATA_OUT_EP_SIZE - 1)))
-	{
-		USB_Out_Buffer[NextUSBOut] = getcUSART();
-		++NextUSBOut;
-		USB_Out_Buffer[NextUSBOut] = 0;
-	}
-
-    //Check if any bytes are waiting in the queue to send to the USB host.
-    //If any bytes are waiting, and the endpoint is available, prepare to
-    //send the USB packet to the host.
-	if((USBUSARTIsTxTrfReady()) && (NextUSBOut > 0))
-	{
-		putUSBUSART(&USB_Out_Buffer[0], NextUSBOut);
-		NextUSBOut = 0;
-	}
-
-    CDCTxService();
-}		//end ProcessIO
-
-/********************************************************************
- * Function:        void BlinkUSBStatus(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        BlinkUSBStatus turns on and off LEDs 
- *                  corresponding to the USB device state.
- *
- * Note:            mLED macros can be found in HardwareProfile.h
- *                  USBDeviceState is declared and updated in
- *                  usb_device.c.
- *******************************************************************/
-void BlinkUSBStatus(void)
-{
-    static WORD led_count=0;
-    
-    if(led_count == 0)led_count = 10000U;
-    led_count--;
-
-    #define mLED_Both_Off()         {mLED_1_Off();mLED_2_Off();}
-    #define mLED_Both_On()          {mLED_1_On();mLED_2_On();}
-    #define mLED_Only_1_On()        {mLED_1_On();mLED_2_Off();}
-    #define mLED_Only_2_On()        {mLED_1_Off();mLED_2_On();}
-
-    if(USBSuspendControl == 1)
-    {
-        if(led_count==0)
-        {
-            mLED_1_Toggle();
-            if(mGetLED_1())
-            {
-                mLED_2_On();
-            }
-            else
-            {
-                mLED_2_Off();
-            }
-        }//end if
+  if (RS232_Out_Data_Rdy == 0)  // only check for new USB buffer if the old RS232 buffer is
+  {						  // empty.  This will cause additional USB packets to be NAK'd
+    LastRS232Out = getsUSBUSART(RS232_Out_Data,64); //until the buffer is free.
+    if(LastRS232Out > 0)
+    {	
+      RS232_Out_Data_Rdy = 1;  // signal buffer full
+      RS232cp = 0;  // Reset the current position
     }
-    else
-    {
-        if(USBDeviceState == DETACHED_STATE)
-        {
-            mLED_Both_Off();
-        }
-        else if(USBDeviceState == ATTACHED_STATE)
-        {
-            mLED_Both_On();
-        }
-        else if(USBDeviceState == POWERED_STATE)
-        {
-            mLED_Only_1_On();
-        }
-        else if(USBDeviceState == DEFAULT_STATE)
-        {
-            mLED_Only_2_On();
-        }
-        else if(USBDeviceState == ADDRESS_STATE)
-        {
-            if(led_count == 0)
-            {
-                mLED_1_Toggle();
-                mLED_2_Off();
-            }//end if
-        }
-        else if(USBDeviceState == CONFIGURED_STATE)
-        {
-            if(led_count==0)
-            {
-                mLED_1_Toggle();
-                if(mGetLED_1())
-                {
-                    mLED_2_Off();
-                }
-                else
-                {
-                    mLED_2_On();
-                }
-            }//end if
-        }//end if(...)
-    }//end if(UCONbits.SUSPND...)
+  }
 
-}//end BlinkUSBStatus
+  //Check if one or more bytes are waiting in the physical UART transmit
+  //queue.  If so, send it out the UART TX pin.
+  if(RS232_Out_Data_Rdy && mTxRdyUSART())
+  {
+    putcUSART(RS232_Out_Data[RS232cp]);
+    ++RS232cp;
+    if (RS232cp == LastRS232Out)
+      RS232_Out_Data_Rdy = 0;
+  }
+
+  //Check if we received a character over the physical UART, and we need
+  //to buffer it up for eventual transmission to the USB host.
+  if(mDataRdyUSART() && (NextUSBOut < (CDC_DATA_OUT_EP_SIZE - 1)))
+  {
+    USB_Out_Buffer[NextUSBOut] = getcUSART();
+    ++NextUSBOut;
+    USB_Out_Buffer[NextUSBOut] = 0;
+  }
+
+  //Check if any bytes are waiting in the queue to send to the USB host.
+  //If any bytes are waiting, and the endpoint is available, prepare to
+  //send the USB packet to the host.
+  if((USBUSARTIsTxTrfReady()) && (NextUSBOut > 0))
+  {
+    putUSBUSART(&USB_Out_Buffer[0], NextUSBOut);
+    NextUSBOut = 0;
+  }
+
+  CDCTxService();
+  numBytes = getsUSBUSART(buffer, sizeof(buffer));
+  if (numBytes > 0) {
+    if (USBUSARTIsTxTrfReady()){
+	  putUSBUSART(buffer, numBytes);
+      for(i=0; i< numBytes; i++) {
+        send_ir_sequence(char_to_code(buffer[i]));
+      }
+	}
+  }
+}		//end ProcessIO
 
 
 // ******************************************************************************************************
