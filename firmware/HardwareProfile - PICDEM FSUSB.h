@@ -105,7 +105,7 @@
     //  final application design.
     #define DEMO_BOARD PICDEM_FS_USB
     #define PICDEM_FS_USB
-    #define CLOCK_FREQ 48000000
+    #define CLOCK_FREQ 20000000
     #define GetSystemClock() (CLOCK_FREQ)
     #define GetInstructionClock() (GetSystemClock() / 2)
 

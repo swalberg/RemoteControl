@@ -53,6 +53,9 @@
     #include "./uart2.h"
 #endif
 
+#include <pwm.h>
+#include <timers.h>
+
 /** CONFIGURATION **************************************************/
         #pragma config PLLDIV   = 5         // (20 MHz crystal on PICDEM FS USB board)
         #pragma config CPUDIV   = OSC1_PLL2   
@@ -69,7 +72,7 @@
         #pragma config MCLRE    = ON
         #pragma config LPT1OSC  = OFF
         #pragma config PBADEN   = OFF
-//      #pragma config CCP2MX   = ON
+        #pragma config CCP2MX   = OFF   // We are using RB3 for the LED
         #pragma config STVREN   = ON
         #pragma config LVP      = OFF
 //      #pragma config ICPRT    = OFF       // Dedicated In-Circuit Debug/Programming
@@ -325,16 +328,65 @@ unsigned long char_to_code(char code) {
   }
 }
 
-// Sets up the IR
-void InitializeIROut(void) {
-  LATB &= 0x00; TRISB &= 0x00;
+void enable_pwm(void) {
+   CCPR2L = 0b01000001;
+   CCP2CON = 0b00011100;
 }
 
+void disable_pwm(void) {
+   CCPR2L = 0b00000000;
+   CCP2CON = 0b00001100;
+}
+
+// Sets up the IR
+void InitializeIROut(void) {
+  TRISB &= 0x00; 
+  
+  /* Configure PWM
+   * Fosc = 20MHz
+   * Fpwm = 37.879KHz
+   * Duty cycle = 50%
+   * Resolution = 9 bits
+   * Prescaler = 4 */
+   PR2 = 0b10000010;
+   T2CON = 0b00000100;
+   CCPR2L = 0b01000001;
+   CCP2CON = 0b00011100;
+}
+
+void mark(int time) {
+  enable_pwm();
+  Delay10us(time);
+}
+
+void space(int time) {
+  disable_pwm();
+  Delay10us(time);
+}
+
+#define DCT_HEADER_MARK 903
+#define DCT_HEADER_SPACE 442
+#define DCT_BIT_MARK 55
+#define DCT_ONE_SPACE 218
+#define DCT_ZERO_SPACE 442
+#define HIGH_BIT 0x8000
+
 void send_ir_sequence(unsigned long sequence) {
-  LATBbits.LATB3 = 1;
-  DelayMs(100);
-  LATBbits.LATB3 = 0;
-  DelayMs(100);
+  int i;
+
+  mark(DCT_HEADER_MARK);
+  mark(DCT_HEADER_SPACE);
+  for (i=0; i < 16; i++) {
+    mark(DCT_BIT_MARK);
+    if (sequence & HIGH_BIT) {
+      space(DCT_ONE_SPACE);
+	} else {
+      space(DCT_ZERO_SPACE);
+    }
+    sequence << 1;
+  }
+  mark(DCT_BIT_MARK);
+  space(0);
 }
 
 
@@ -353,24 +405,25 @@ void send_ir_sequence(unsigned long sequence) {
  *
  * Note:            None
  *****************************************************************************/
-#if defined(__18CXX)
-void main(void)
-#else
-int main(void)
-#endif
-{
-  BYTE i;
-
+void main(void) {
+  int i;
   InitializeSystem();
   InitializeIROut();
-  LATB &= 0x00; TRISB &= 0x00;
-
+  enable_pwm();
+  while(1) ;
+  for (i=0; i < 3; i++) {
+    enable_pwm();
+    DelayMs(500);
+    disable_pwm();
+    DelayMs(500);
+  }
+  
+  disable_pwm();   
   #if defined(USB_INTERRUPT)
     USBDeviceAttach();
   #endif
 
   while(1) {
-
     // Application-specific tasks.
     ProcessIO();
 
@@ -400,121 +453,11 @@ int main(void)
  *******************************************************************/
 static void InitializeSystem(void)
 {
-    #if (defined(__18CXX) & !defined(PIC18F87J50_PIM))
-        ADCON1 |= 0x0F;                 // Default all pins to digital
-    #elif defined(__C30__)
-    	#if defined(__PIC24FJ256DA210__) || defined(__PIC24FJ256GB210__)
-    		ANSA = 0x0000;
-    		ANSB = 0x0000;
-    		ANSC = 0x0000;
-    		ANSD = 0x0000;
-    		ANSE = 0x0000;
-    		ANSF = 0x0000;
-    		ANSG = 0x0000;
-       #elif defined(__dsPIC33EP512MU810__) || defined (__PIC24EP512GU810__)
-        	ANSELA = 0x0000;
-    		ANSELB = 0x0000;
-    		ANSELC = 0x0000;
-    		ANSELD = 0x0000;
-    		ANSELE = 0x0000;
-    		ANSELG = 0x0000;
-            
+ 
+    ADCON1 |= 0x0F;                 // Default all pins to digital
+//    OSCCON = 0x70;
 
-        #else
-        	AD1PCFGL = 0xFFFF;
-        #endif  
-    #elif defined(__C32__)
-        AD1PCFG = 0xFFFF;
-    #endif
-
-    #if defined(PIC18F87J50_PIM) || defined(PIC18F46J50_PIM) || defined(PIC18F47J53_PIM)
-	//On the PIC18F87J50 Family of USB microcontrollers, the PLL will not power up and be enabled
-	//by default, even if a PLL enabled oscillator configuration is selected (such as HS+PLL).
-	//This allows the device to power up at a lower initial operating frequency, which can be
-	//advantageous when powered from a source which is not gauranteed to be adequate for 48MHz
-	//operation.  On these devices, user firmware needs to manually set the OSCTUNE<PLLEN> bit to
-	//power up the PLL.
-    {
-        unsigned int pll_startup_counter = 600;
-        OSCTUNEbits.PLLEN = 1;  //Enable the PLL and wait 2+ms until the PLL locks before enabling USB module
-        while(pll_startup_counter--);
-    }
-    //Device switches over automatically to PLL output after PLL is locked and ready.
-    #endif
-
-    #if defined(PIC18F87J50_PIM)
-	//Configure all I/O pins to use digital input buffers.  The PIC18F87J50 Family devices
-	//use the ANCONx registers to control this, which is different from other devices which
-	//use the ADCON1 register for this purpose.
-    WDTCONbits.ADSHR = 1;			// Select alternate SFR location to access ANCONx registers
-    ANCON0 = 0xFF;                  // Default all pins to digital
-    ANCON1 = 0xFF;                  // Default all pins to digital
-    WDTCONbits.ADSHR = 0;			// Select normal SFR locations
-    #endif
-
-    #if defined(PIC18F46J50_PIM) || defined(PIC18F47J53_PIM)
-	//Configure all I/O pins to use digital input buffers.  The PIC18F87J50 Family devices
-	//use the ANCONx registers to control this, which is different from other devices which
-	//use the ADCON1 register for this purpose.
-    ANCON0 = 0xFF;                  // Default all pins to digital
-    ANCON1 = 0xFF;                  // Default all pins to digital
-    #endif
-    
-   #if defined(PIC24FJ64GB004_PIM) || defined(PIC24FJ256DA210_DEV_BOARD)
-	//On the PIC24FJ64GB004 Family of USB microcontrollers, the PLL will not power up and be enabled
-	//by default, even if a PLL enabled oscillator configuration is selected (such as HS+PLL).
-	//This allows the device to power up at a lower initial operating frequency, which can be
-	//advantageous when powered from a source which is not gauranteed to be adequate for 32MHz
-	//operation.  On these devices, user firmware needs to manually set the CLKDIV<PLLEN> bit to
-	//power up the PLL.
-    {
-        unsigned int pll_startup_counter = 600;
-        CLKDIVbits.PLLEN = 1;
-        while(pll_startup_counter--);
-    }
-
-    //Device switches over automatically to PLL output after PLL is locked and ready.
-    #endif
-
-   #if defined(__dsPIC33EP512MU810__) || defined (__PIC24EP512GU810__)
-
-    // Configure the device PLL to obtain 60 MIPS operation. The crystal
-    // frequency is 8MHz. Divide 8MHz by 2, multiply by 60 and divide by
-    // 2. This results in Fosc of 120MHz. The CPU clock frequency is
-    // Fcy = Fosc/2 = 60MHz. Wait for the Primary PLL to lock and then
-    // configure the auxilliary PLL to provide 48MHz needed for USB 
-    // Operation.
-
-	PLLFBD = 58;				/* M  = 60	*/
-	CLKDIVbits.PLLPOST = 0;		/* N1 = 2	*/
-	CLKDIVbits.PLLPRE = 0;		/* N2 = 2	*/
-	OSCTUN = 0;			
-
-    /*	Initiate Clock Switch to Primary
-     *	Oscillator with PLL (NOSC= 0x3)*/
-	
-    __builtin_write_OSCCONH(0x03);		
-	__builtin_write_OSCCONL(0x01);
-	
-    
-	while (OSCCONbits.COSC != 0x3);       
-
-    // Configuring the auxiliary PLL, since the primary
-    // oscillator provides the source clock to the auxiliary
-    // PLL, the auxiliary oscillator is disabled. Note that
-    // the AUX PLL is enabled. The input 8MHz clock is divided
-    // by 2, multiplied by 24 and then divided by 2. Wait till 
-    // the AUX PLL locks.
-
-    ACLKCON3 = 0x24C1;   
-    ACLKDIV3 = 0x7;
-    ACLKCON3bits.ENAPLL = 1;
-    while(ACLKCON3bits.APLLCK != 1); 
-
-    #endif
-
-
-//	The USB specifications require that USB peripheral devices must never source
+ //	The USB specifications require that USB peripheral devices must never source
 //	current onto the Vbus pin.  Additionally, USB peripherals should not source
 //	current on D+ or D- when the host/hub is not actively powering the Vbus line.
 //	When designing a self powered (as opposed to bus powered) USB peripheral
@@ -630,57 +573,11 @@ void InitializeUSART(void)
         c = RCREG;				// read 
     #endif
 
-    #if defined(__C30__)
-        #if defined( __PIC24FJ256GB110__ ) || defined( PIC24FJ256GB210_PIM )
-            // PPS - Configure U2RX - put on pin 49 (RP10)
-            RPINR19bits.U2RXR = 10;
-
-            // PPS - Configure U2TX - put on pin 50 (RP17)
-            RPOR8bits.RP17R = 5;
-        #elif defined(__PIC24FJ64GB004__)
-            // PPS - Configure U2RX - put on RC3/pin 36 (RP19)
-            RPINR19bits.U2RXR = 19;
-
-            // PPS - Configure U2TX - put on RC9/pin 5 (RP25)
-            RPOR12bits.RP25R = 5;
-        #elif defined(__PIC24FJ256DA210__)
-            // PPS - Configure U2RX - put on RC14/pin 74 (RPI37)
-            RPINR19bits.U2RXR = 37;
-    
-            // PPS - Configure U2TX - put on RF3/pin 51 (RP16)
-            RPOR8bits.RP16R = 5;
-
-            TRISFbits.TRISF3 = 0;
-        #elif defined(__dsPIC33EP512MU810__) || defined (__PIC24EP512GU810__)
-            // The dsPIC33EP512MU810 features Peripheral Pin
-            // select. The following statements map UART2 to 
-            // device pins which would connect to the the 
-            // RX232 transciever on the Explorer 16 board.
-
-             RPINR19 = 0;
-             RPINR19 = 0x64;
-             RPOR9bits.RP101R = 0x3;
-
-        #else
-            #error Verify that any required PPS is done here.
-        #endif
-
-        UART2Init();
-    #endif
-
-    #if defined(__C32__)
-        UART2Init();
-    #endif
-
 }//end InitializeUSART
 
-#if defined(__18CXX)
-    #define mDataRdyUSART() PIR1bits.RCIF
-    #define mTxRdyUSART()   TXSTAbits.TRMT
-#elif defined(__C30__) || defined(__C32__)
-    #define mDataRdyUSART() UART2IsPressed()
-    #define mTxRdyUSART()   U2STAbits.TRMT
-#endif
+
+  #define mDataRdyUSART() PIR1bits.RCIF
+  #define mTxRdyUSART()   TXSTAbits.TRMT
 
 /******************************************************************************
  * Function:        void putcUSART(char c)
@@ -700,11 +597,7 @@ void InitializeUSART(void)
  *****************************************************************************/
 void putcUSART(char c)  
 {
-    #if defined(__18CXX)
-	    TXREG = c;
-    #else
-        UART2PutChar(c);
-    #endif
+   TXREG = c;
 }
 
 
@@ -845,7 +738,7 @@ void ProcessIO(void)
 
   if((USBDeviceState < CONFIGURED_STATE)||(USBSuspendControl==1)) return;
 
-  if (RS232_Out_Data_Rdy == 0)  // only check for new USB buffer if the old RS232 buffer is
+/*  if (RS232_Out_Data_Rdy == 0)  // only check for new USB buffer if the old RS232 buffer is
   {						  // empty.  This will cause additional USB packets to be NAK'd
     LastRS232Out = getsUSBUSART(RS232_Out_Data,64); //until the buffer is free.
     if(LastRS232Out > 0)
@@ -882,8 +775,8 @@ void ProcessIO(void)
     putUSBUSART(&USB_Out_Buffer[0], NextUSBOut);
     NextUSBOut = 0;
   }
-
-  CDCTxService();
+*/
+  
   numBytes = getsUSBUSART(buffer, sizeof(buffer));
   if (numBytes > 0) {
     if (USBUSARTIsTxTrfReady()){
@@ -893,6 +786,7 @@ void ProcessIO(void)
       }
 	}
   }
+  CDCTxService();
 }		//end ProcessIO
 
 
