@@ -402,15 +402,15 @@ void main(void) {
   int i;
   InitializeSystem();
   InitializeIROut();
-//  enable_pwm();
-  while(1) ;
+ 
+  // Let them know we're on
   for (i=0; i < 3; i++) {
     enable_pwm();
     DelayMs(500);
     disable_pwm();
     DelayMs(500);
   }
-  
+
   disable_pwm();   
   #if defined(USB_INTERRUPT)
     USBDeviceAttach();
@@ -731,45 +731,6 @@ void ProcessIO(void)
 
   if((USBDeviceState < CONFIGURED_STATE)||(USBSuspendControl==1)) return;
 
-/*  if (RS232_Out_Data_Rdy == 0)  // only check for new USB buffer if the old RS232 buffer is
-  {						  // empty.  This will cause additional USB packets to be NAK'd
-    LastRS232Out = getsUSBUSART(RS232_Out_Data,64); //until the buffer is free.
-    if(LastRS232Out > 0)
-    {	
-      RS232_Out_Data_Rdy = 1;  // signal buffer full
-      RS232cp = 0;  // Reset the current position
-    }
-  }
-
-  //Check if one or more bytes are waiting in the physical UART transmit
-  //queue.  If so, send it out the UART TX pin.
-  if(RS232_Out_Data_Rdy && mTxRdyUSART())
-  {
-    putcUSART(RS232_Out_Data[RS232cp]);
-    ++RS232cp;
-    if (RS232cp == LastRS232Out)
-      RS232_Out_Data_Rdy = 0;
-  }
-
-  //Check if we received a character over the physical UART, and we need
-  //to buffer it up for eventual transmission to the USB host.
-  if(mDataRdyUSART() && (NextUSBOut < (CDC_DATA_OUT_EP_SIZE - 1)))
-  {
-    USB_Out_Buffer[NextUSBOut] = getcUSART();
-    ++NextUSBOut;
-    USB_Out_Buffer[NextUSBOut] = 0;
-  }
-
-  //Check if any bytes are waiting in the queue to send to the USB host.
-  //If any bytes are waiting, and the endpoint is available, prepare to
-  //send the USB packet to the host.
-  if((USBUSARTIsTxTrfReady()) && (NextUSBOut > 0))
-  {
-    putUSBUSART(&USB_Out_Buffer[0], NextUSBOut);
-    NextUSBOut = 0;
-  }
-*/
-  
   numBytes = getsUSBUSART(buffer, sizeof(buffer));
   if (numBytes > 0) {
     if (USBUSARTIsTxTrfReady()){
@@ -835,55 +796,9 @@ void USBCBSuspend(void)
 	//things to not work as intended.	
 	
 
-    #if defined(__C30__)
-    #if 0
-        U1EIR = 0xFFFF;
-        U1IR = 0xFFFF;
-        U1OTGIR = 0xFFFF;
-        IFS5bits.USB1IF = 0;
-        IEC5bits.USB1IE = 1;
-        U1OTGIEbits.ACTVIE = 1;
-        U1OTGIRbits.ACTVIF = 1;
-        Sleep();
-    #endif
-    #endif
-}
+ }
 
 
-/******************************************************************************
- * Function:        void _USB1Interrupt(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        This function is called when the USB interrupt bit is set
- *					In this example the interrupt is only used when the device
- *					goes to sleep when it receives a USB suspend command
- *
- * Note:            None
- *****************************************************************************/
-#if 0
-void __attribute__ ((interrupt)) _USB1Interrupt(void)
-{
-    #if !defined(self_powered)
-        if(U1OTGIRbits.ACTVIF)
-        {
-            IEC5bits.USB1IE = 0;
-            U1OTGIEbits.ACTVIE = 0;
-            IFS5bits.USB1IF = 0;
-        
-            //USBClearInterruptFlag(USBActivityIFReg,USBActivityIFBitNum);
-            USBClearInterruptFlag(USBIdleIFReg,USBIdleIFBitNum);
-            //USBSuspendControl = 0;
-        }
-    #endif
-}
-#endif
 
 /******************************************************************************
  * Function:        void USBCBWakeFromSuspend(void)
