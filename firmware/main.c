@@ -329,7 +329,7 @@ unsigned long char_to_code(char code) {
 }
 
 void enable_pwm(void) {
-   CCPR2L = 0b01000001;
+   CCPR2L = 0b00100111;
    CCP2CON = 0b00011100;
 }
 
@@ -342,16 +342,9 @@ void disable_pwm(void) {
 void InitializeIROut(void) {
   TRISB &= 0x00; 
   
-  /* Configure PWM
-   * Fosc = 20MHz
-   * Fpwm = 37.879KHz
-   * Duty cycle = 50%
-   * Resolution = 9 bits
-   * Prescaler = 4 */
-   PR2 = 0b10000010;
-   T2CON = 0b00000100;
-   CCPR2L = 0b01000001;
-   CCP2CON = 0b00011100;
+  PR2 = 0b01001110;
+  T2CON = 0b00000101;
+  enable_pwm();
 }
 
 void mark(int time) {
@@ -409,7 +402,7 @@ void main(void) {
   int i;
   InitializeSystem();
   InitializeIROut();
-  enable_pwm();
+//  enable_pwm();
   while(1) ;
   for (i=0; i < 3; i++) {
     enable_pwm();
