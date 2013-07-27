@@ -329,6 +329,13 @@ unsigned long char_to_code(char code) {
 }
 
 void enable_pwm(void) {
+   //CCPR2L = 0b00100111;
+   //CCP2CON = 0b00011100;
+   CCPR2L = 0b01101001;
+   CCP2CON = 0b00011100;
+
+   PR2 = 0b1001110;
+   T2CON = 0b00000101;
    CCPR2L = 0b00100111;
    CCP2CON = 0b00011100;
 }
@@ -342,8 +349,6 @@ void disable_pwm(void) {
 void InitializeIROut(void) {
   TRISB &= 0x00; 
   
-  PR2 = 0b01001110;
-  T2CON = 0b00000101;
   enable_pwm();
 }
 
@@ -359,16 +364,16 @@ void space(int time) {
 
 #define DCT_HEADER_MARK 903
 #define DCT_HEADER_SPACE 442
-#define DCT_BIT_MARK 55
+#define DCT_BIT_MARK 56
 #define DCT_ONE_SPACE 218
 #define DCT_ZERO_SPACE 442
-#define HIGH_BIT 0x8000
+#define HIGH_BIT 0b1000000000000000
 
 void send_ir_sequence(unsigned long sequence) {
   int i;
 
   mark(DCT_HEADER_MARK);
-  mark(DCT_HEADER_SPACE);
+  space(DCT_HEADER_SPACE);
   for (i=0; i < 16; i++) {
     mark(DCT_BIT_MARK);
     if (sequence & HIGH_BIT) {
@@ -376,7 +381,7 @@ void send_ir_sequence(unsigned long sequence) {
 	} else {
       space(DCT_ZERO_SPACE);
     }
-    sequence << 1;
+    sequence <<= 1;
   }
   mark(DCT_BIT_MARK);
   space(0);
@@ -402,7 +407,7 @@ void main(void) {
   int i;
   InitializeSystem();
   InitializeIROut();
- 
+
   // Let them know we're on
   for (i=0; i < 3; i++) {
     enable_pwm();
@@ -411,11 +416,9 @@ void main(void) {
     DelayMs(500);
   }
 
-  disable_pwm();   
   #if defined(USB_INTERRUPT)
     USBDeviceAttach();
   #endif
-
   while(1) {
     // Application-specific tasks.
     ProcessIO();
@@ -734,9 +737,10 @@ void ProcessIO(void)
   numBytes = getsUSBUSART(buffer, sizeof(buffer));
   if (numBytes > 0) {
     if (USBUSARTIsTxTrfReady()){
-	  putUSBUSART(buffer, numBytes);
+	  //putUSBUSART(buffer, numBytes);
       for(i=0; i< numBytes; i++) {
         send_ir_sequence(char_to_code(buffer[i]));
+        DelayMs(1000);
       }
 	}
   }
